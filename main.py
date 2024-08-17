@@ -14,6 +14,11 @@ import os
 import pandas as pd
 import json
 
+# code added to remove the raster with no data
+from rasterio.windows import get_data_window
+from rasterio.windows import transform as trfs
+from sklearn.preprocessing import MinMaxScaler
+
 app = FastAPI()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -124,13 +129,15 @@ def get_edge_length(res, unit="km"):
     else:
         raise ValueError("Invalid unit. Use 'km' for kilometers or 'm' for meters.")
 
-async def process_raster(file: UploadFile, table_name: str, h3_res: int, sample_by: str):
+async def process_raster(file: UploadFile, table_name: str, h3_res: int, sample_by: str, preserve_range: bool= True):
     cog_file_path = await download_cog(file)
     logging.info(f"Processing raster file: {cog_file_path}")
 
     with rasterio.open(cog_file_path) as src:
         grayscale = src.read(1)
         transform = src.transform
+        min_value = np.min(grayscale)
+        max_value = np.max(grayscale)
 
         native_h3_res = nearest_h3_resolution(
             grayscale.shape, src.transform, search_mode="smaller_than_pixel"
@@ -162,6 +169,12 @@ async def process_raster(file: UploadFile, table_name: str, h3_res: int, sample_
             grayscale = data[0]
             logging.info("Resampling Done")
 
+            if preserve_range:
+                scaler = MinMaxScaler(feature_range=(min_value, max_value))
+                grayscale = scaler.fit_transform(grayscale.reshape(-1, 1)).reshape(
+                grayscale.shape
+                )
+
             nodata_value = src.nodata
             if nodata_value is not None:
                 grayscale = np.where(grayscale == nodata_value, 0, grayscale)
@@ -175,7 +188,7 @@ async def process_raster(file: UploadFile, table_name: str, h3_res: int, sample_
             grayscale,
             transform,
             native_h3_res,
-            nodata_value=None,
+            nodata_value=0,
             compact=True,
         )
         grayscale_h3_df_pandas = grayscale_h3_df.to_pandas()
