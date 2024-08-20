@@ -1,18 +1,28 @@
-from sqlalchemy import create_engine
+from fastapi import FastAPI, HTTPException, Depends
+from sqlalchemy import create_engine, MetaData, Table, select, distinct
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker,Session
-from typing import Generator
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.future import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from databases import Database
 
-SQLALCHEMY_DATABASE_URL = 'postgresql://postgres:postgres@localhost/practice'
+DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost/practice"
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+database = Database(DATABASE_URL)
+metadata = MetaData()
 
-Base = declarative_base()
+# Define the wards table
+wards = Table(
+    "wards", metadata,
+    autoload_with=create_engine(DATABASE_URL.replace("asyncpg", "psycopg2"))
+)
 
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+engine = create_async_engine(DATABASE_URL, echo=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=AsyncSession)
+
+app = FastAPI()
+
+# Dependency
+async def get_db():
+    async with SessionLocal() as session:
+        yield session

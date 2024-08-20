@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dristi Map - Flood Risk Layer</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@4.5.0/dist/maplibre-gl.css"
+      crossorigin="anonymous"
+    />
+    <script
+      src="https://unpkg.com/maplibre-gl@4.5.0/dist/maplibre-gl.js"
+      crossorigin="anonymous"
+    ></script>
+    <style>
+      body,
+      html {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+      }
+      #map {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 100%;
+      }
+      .map-overlay {
+        position: absolute;
+        bottom: 20px;
+        right: 20px;
+        background: rgba(255, 255, 255, 0.8);
+        padding: 10px;
+        font-family: Arial, sans-serif;
+        border-radius: 3px;
+      }
+      #legend {
+        line-height: 18px;
+      }
+      .legend-key {
+        display: inline-block;
+        width: 30px;
+        height: 18px;
+        margin-right: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div class="map-overlay">
+      <div id="legend"></div>
+    </div>
+    <script>
+      var map = new maplibregl.Map({
+        container: "map",
+        style:
+          "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+        center: [84.48297426645105, 28.4049665586974],
+        zoom: 6,
+        projection: 'mercator'
+      });
+
+      map.on("load", function () {
+        map.addSource("flood_extent", {
+          type: "vector",
+          tiles: ["http://0.0.0.0:8000/{z}/{x}/{y}.pbf"],
+          minzoom: 0,
+          maxzoom: 22,
+        });
+
+        map.addLayer({
+          id: "flood_extent",
+          type: "fill",
+          source: "flood_extent",
+          "source-layer": "flood_extent",
+          paint: {
+            "fill-color": [
+              "step",
+              ["get", "cell_value"],
+              "#ffebeb", // Low risk (0)
+              1,
+              "#ffb3b3", // Slight risk (1)
+              2,
+              "#ff6666", // Medium risk (2)
+              3,
+              "#ff0000", // High risk (3)
+            ],
+            "fill-opacity": 0.75,
+          },
+        });
+
+        // Add legend
+        var legend = document.getElementById("legend");
+        var labels = ["Low risk", "Slight risk", "Medium risk", "High risk"];
+        var colors = ["#ffebeb", "#ffb3b3", "#ff6666", "#ff0000"];
+
+        for (var i = 0; i < labels.length; i++) {
+          var layer = labels[i];
+          var color = colors[i];
+          var item = document.createElement("div");
+          var key = document.createElement("span");
+          key.className = "legend-key";
+          key.style.backgroundColor = color;
+
+          var value = document.createElement("span");
+          value.innerHTML = layer;
+          item.appendChild(key);
+          item.appendChild(value);
+          legend.appendChild(item);
+        }
+
+
+
+
+      });
+    </script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException,Depends, Query
 from pydantic import BaseModel
 from typing import Optional
 import io
@@ -13,13 +13,32 @@ import h3
 import os
 import pandas as pd
 import json
+from fastapi.middleware.cors import CORSMiddleware
 
 # code added to remove the raster with no data
 from rasterio.windows import get_data_window
 from rasterio.windows import transform as trfs
 from sklearn.preprocessing import MinMaxScaler
 
+
+
+import asyncpg
+from asyncache import cached
+from cachetools import TTLCache
+from fastapi.responses import Response
+
+
+from sqlalchemy import create_engine, text
+
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins. Change this to specific domains in production.
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -175,7 +194,8 @@ async def process_raster(file: UploadFile, table_name: str, h3_res: int, sample_
                 grayscale.shape
                 )
 
-            nodata_value = src.nodata
+            nodata_value = src.nodata   # this code is not working I think so
+            print(nodata_value)
             if nodata_value is not None:
                 grayscale = np.where(grayscale == nodata_value, 0, grayscale)
 
@@ -183,6 +203,9 @@ async def process_raster(file: UploadFile, table_name: str, h3_res: int, sample_
                 grayscale.shape, transform, search_mode="smaller_than_pixel"
             )
             logging.info(f"New Native H3 resolution: {native_h3_res}")
+
+                    # Filter out NaN values
+        grayscale = np.nan_to_num(grayscale, nan=0)
 
         grayscale_h3_df = raster_to_dataframe(
             grayscale,
@@ -246,3 +269,257 @@ async def visualize_h3_data(table_name: str):
         return geojson_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# to visulaize the data as MVT tiles
+# Create a cache with a maximum of 1000 items and a 1-hour TTL
+# DATABASE_URL = os.getenv(
+#     "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/postgres"
+# )
+
+TABLE = {
+    'table': os.getenv('TILE_TABLE_NAME', 'flood_extent'),
+    'srid': os.getenv('TILE_TABLE_SRID', '4326'),
+    'h3inxColumn': os.getenv('TILE_TABLE_H3INX_COLUMN', 'h3_ix'),
+    'h3inxRes': os.getenv('TILE_TABLE_H3INX_RESOLUTION', 8),
+    'attrColumns': os.getenv('TILE_TABLE_ATTR_COLUMNS', 'cell_value')
+}
+
+
+cache = TTLCache(maxsize=1000, ttl=3600)
+
+async def get_db_pool():
+    return await asyncpg.create_pool(DATABASE_URL)
+
+@cached(cache)
+async def get_tile(zoom: int, x: int, y: int, pool):
+    # async with pool.acquire() as conn:
+    #     env = tile_to_envelope(zoom, x, y)
+    #     sql = envelope_to_sql(env)
+    #     logging.debug(f"SQL Query: {sql}")  # Print the SQL query
+    #     pbf = await conn.fetchval(sql)
+    #     logging.debug(f"PBF data received. Size: {len(pbf)} bytes")
+    #     return await conn.fetchval(sql)
+    async with pool.acquire() as conn:
+        env = tile_to_envelope(zoom, x, y)
+        sql = envelope_to_sql(env)
+        logging.debug(f"SQL Query: {sql}")  # Print the SQL query
+        
+        try:
+            pbf = await conn.fetchval(sql)
+            if not pbf:
+                raise Exception("No PBF data returned from the query")
+            logging.debug(f"PBF data received. Size: {len(pbf)} bytes")
+            return pbf
+        except Exception as e:
+            logging.error(f"Error fetching tile: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+        
+def tile_to_envelope(zoom: int, x: int, y: int):
+    world_merc_max = 20037508.3427892
+    world_merc_min = -world_merc_max
+    world_merc_size = world_merc_max - world_merc_min
+    world_tile_size = 2 ** zoom
+    tile_merc_size = world_merc_size / world_tile_size
+    
+    env = {
+        'xmin': world_merc_min + tile_merc_size * x,
+        'xmax': world_merc_min + tile_merc_size * (x + 1),
+        'ymin': world_merc_max - tile_merc_size * (y + 1),
+        'ymax': world_merc_max - tile_merc_size * y
+    }
+    return env
+
+def envelope_to_bounds_sql(env):
+    DENSIFY_FACTOR = 4
+    env['segSize'] = (env['xmax'] - env['xmin']) / DENSIFY_FACTOR
+    sql_tmpl = 'ST_Segmentize(ST_MakeEnvelope({xmin}, {ymin}, {xmax}, {ymax}, 3857), {segSize})'
+    return sql_tmpl.format(**env)
+
+def envelope_to_sql(env):
+    tbl = TABLE.copy()
+    tbl['env'] = envelope_to_bounds_sql(env)
+    sql_tmpl = """
+        WITH 
+         bounds AS (
+            SELECT {env} AS geom, 
+                   {env}::box2d AS b2d
+        ),
+        mvtgeom AS (
+            SELECT ST_AsMVTGeom(ST_Transform(h3_cell_to_boundary_geometry(t.{h3inxColumn}), 3857), bounds.b2d) AS geom, 
+                   {attrColumns}
+            FROM {table} t, bounds
+            WHERE {h3inxColumn} = ANY (get_h3_indexes(ST_Transform(bounds.geom, {srid}),{h3inxRes}))
+        ) 
+        SELECT ST_AsMVT(mvtgeom.*) FROM mvtgeom
+    """
+    return sql_tmpl.format(**tbl)
+
+@app.on_event("startup")
+async def startup_event():
+    app.state.pool = await get_db_pool()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await app.state.pool.close()
+
+@app.get("/{zoom}/{x}/{y}.{format}")
+async def get_mvt_tile(zoom: int, x: int, y: int, format: str):
+    if format not in ['pbf', 'mvt']:
+        raise HTTPException(status_code=400, detail="Invalid format. Use 'pbf' or 'mvt'.")
+    
+    tile_size = 2 ** zoom
+    if x < 0 or y < 0 or x >= tile_size or y >= tile_size:
+        raise HTTPException(status_code=400, detail="Invalid tile coordinates.")
+
+    try:
+        pbf = await get_tile(zoom, x, y, app.state.pool)
+        return Response(content=pbf, media_type="application/vnd.mapbox-vector-tile")
+    except Exception as e:
+        # raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+#get the ward from the datbase
+engine = create_engine(DATABASE_URL)
+# @app.get("/ward-data/")
+# async def get_ward_data(
+#     state_code: int = Query(None, description="Select State Code"),
+#     district: str = Query(None, description="Select District"),
+#     municipality: str = Query(None, description="Select Municipality"),
+#     ward_number: int = Query(None, description="Select Ward Number"),
+# ):
+#     with engine.connect() as connection:
+#         if not state_code and not district and not municipality and not ward_number:
+#             state_codes = connection.execute(text("SELECT DISTINCT \"STATE_CODE\" FROM wards ORDER BY \"STATE_CODE\"")).fetchall()
+#             districts = connection.execute(text("SELECT DISTINCT \"DISTRICT\" FROM wards ORDER BY \"DISTRICT\"")).fetchall()
+#             municipalities = connection.execute(text("SELECT DISTINCT \"GaPa_NaPa\" FROM wards ORDER BY \"GaPa_NaPa\"")).fetchall()
+#             wards = connection.execute(text("SELECT DISTINCT \"NEW_WARD_N\" FROM wards ORDER BY \"NEW_WARD_N\"")).fetchall()
+
+#             state_codes = [row[0] for row in state_codes]
+#             districts = [row[0] for row in districts]
+#             municipalities = [row[0] for row in municipalities]
+#             wards = [row[0] for row in wards]
+
+#             return {
+#                 "state_codes": state_codes,
+#                 "districts": districts,
+#                 "municipalities": municipalities,
+#                 "wards": wards,
+#             }
+#         elif state_code and district and municipality and ward_number:
+#             query = text("""
+#                 SELECT ST_AsGeoJSON(geom) as geojson
+#                 FROM wards
+#                 WHERE "STATE_CODE" = :state_code
+#                 AND "DISTRICT" = :district
+#                 AND "GaPa_NaPa" = :municipality
+#                 AND "NEW_WARD_N" = :ward_number
+#                 LIMIT 1;
+#             """)
+
+#             result = connection.execute(query, {
+#                 "state_code": state_code,
+#                 "district": district,
+#                 "municipality": municipality,
+#                 "ward_number": ward_number
+#             }).mappings().fetchone()  # Use mappings() for dictionary-like access
+
+#             if not result:
+#                 raise HTTPException(status_code=404, detail="Ward not found")
+
+#             geojson = result['geojson']  # Access by column name
+#             return json.loads(geojson)
+#         else:
+#             raise HTTPException(status_code=400, detail="Please provide all required parameters: state_code, district, municipality, and ward_number")
+
+# Helper function to get distinct values for dropdowns
+def get_distinct_values(column_name: str, filter_conditions: dict = None):
+    query = f'SELECT DISTINCT "{column_name}" FROM wards'
+    conditions = []
+    params = {}
+    if filter_conditions:
+        for column, value in filter_conditions.items():
+            if value is not None:
+                conditions.append(f'"{column}" = :{column}')
+                params[column] = value
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += f' ORDER BY "{column_name}"'
+    
+    with engine.connect() as connection:
+        result = connection.execute(text(query), params).fetchall()
+        return [row[0] for row in result]
+
+# Endpoint to get the ward data with dropdown options
+@app.get("/ward-data/")
+async def get_ward_data(
+    state_code: int = Query(None, description="Select State Code"),
+    district: str = Query(None, description="Select District"),
+    municipality: str = Query(None, description="Select Municipality"),
+    ward_number: int = Query(None, description="Select Ward Number"),
+):
+    # If no parameters are provided, return the options for all dropdowns
+    if state_code is None and district is None and municipality is None and ward_number is None:
+        state_codes = get_distinct_values("STATE_CODE")
+        districts = get_distinct_values("DISTRICT")
+        municipalities = get_distinct_values("GaPa_NaPa")
+        wards = get_distinct_values("NEW_WARD_N")
+
+        return {
+            "state_codes": state_codes,
+            "districts": districts,
+            "municipalities": municipalities,
+            "wards": wards,
+        }
+
+    # If all parameters are provided, return the GeoJSON
+    elif state_code and district and municipality and ward_number:
+        query = text("""
+            SELECT ST_AsGeoJSON(geom) as geojson
+            FROM wards
+            WHERE "STATE_CODE" = :state_code
+            AND "DISTRICT" = :district
+            AND "GaPa_NaPa" = :municipality
+            AND "NEW_WARD_N" = :ward_number
+            LIMIT 1;
+        """)
+
+        with engine.connect() as connection:
+            result = connection.execute(query, {
+                "state_code": state_code,
+                "district": district,
+                "municipality": municipality,
+                "ward_number": ward_number
+            }).mappings().fetchone()
+
+        if not result:
+            raise HTTPException(status_code=404, detail="Ward not found")
+
+        geojson = result['geojson']
+        return json.loads(geojson)
+
+    # If some parameters are provided, return the options for the next dropdowns
+    else:
+        filter_conditions = {
+            "STATE_CODE": state_code,
+            "DISTRICT": district,
+            "GaPa_NaPa": municipality
+        }
+
+        if state_code is not None and district is None:
+            districts = get_distinct_values("DISTRICT", filter_conditions)
+            return {"districts": districts}
+
+        elif district is not None and municipality is None:
+            municipalities = get_distinct_values("GaPa_NaPa", filter_conditions)
+            return {"municipalities": municipalities}
+
+        elif municipality is not None and ward_number is None:
+            wards = get_distinct_values("NEW_WARD_N", filter_conditions)
+            return {"wards": wards}
+
+        raise HTTPException(status_code=400, detail="Invalid parameter combination")

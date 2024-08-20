@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ward Data Selection</title>
+</head>
+<body>
+    <h1>Select Ward to Get GeoJSON</h1>
+
+    <form id="wardDataForm">
+        <label for="state">State Code:</label>
+        <select id="state" name="state">
+            <option value="">Select State</option>
+            <option value="7">State 7</option> <!-- Example for State 7 -->
+            <!-- Add other states if necessary -->
+        </select>
+        <br><br>
+
+        <label for="district">District:</label>
+        <select id="district" name="district" disabled>
+            <option value="">Select District</option>
+        </select>
+        <br><br>
+
+        <label for="municipality">Municipality:</label>
+        <select id="municipality" name="municipality" disabled>
+            <option value="">Select Municipality</option>
+        </select>
+        <br><br>
+
+        <label for="ward">Ward:</label>
+        <select id="ward" name="ward" disabled>
+            <option value="">Select Ward</option>
+        </select>
+        <br><br>
+
+        <button type="button" id="getGeoJSON">Get GeoJSON</button>
+    </form>
+
+    <pre id="geojsonOutput"></pre>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const stateSelect = document.getElementById('state');
+            const districtSelect = document.getElementById('district');
+            const municipalitySelect = document.getElementById('municipality');
+            const wardSelect = document.getElementById('ward');
+            const geojsonOutput = document.getElementById('geojsonOutput');
+            const getGeoJSONButton = document.getElementById('getGeoJSON');
+
+            stateSelect.addEventListener('change', function () {
+                const selectedState = this.value;
+
+                if (selectedState) {
+                    fetch(`http://localhost:8000/districts/${selectedState}/`)
+                        .then(response => response.json())
+                        .then(districts => {
+                            districtSelect.disabled = false;
+                            populateDropdown(districtSelect, districts, 'district_name', 'district_id');
+                        })
+                        .catch(error => console.error('Error fetching districts:', error));
+                } else {
+                    districtSelect.disabled = true;
+                    municipalitySelect.disabled = true;
+                    wardSelect.disabled = true;
+                }
+            });
+
+            districtSelect.addEventListener('change', function () {
+                const selectedDistrict = this.value;
+
+                if (selectedDistrict) {
+                    fetch(`http://localhost:8000/municipalities/${selectedDistrict}/`)
+                        .then(response => response.json())
+                        .then(municipalities => {
+                            municipalitySelect.disabled = false;
+                            populateDropdown(municipalitySelect, municipalities, 'municipality_name', 'municipality_id');
+                        })
+                        .catch(error => console.error('Error fetching municipalities:', error));
+                } else {
+                    municipalitySelect.disabled = true;
+                    wardSelect.disabled = true;
+                }
+            });
+
+            municipalitySelect.addEventListener('change', function () {
+                const selectedMunicipality = this.value;
+
+                if (selectedMunicipality) {
+                    fetch(`http://localhost:8000/wards/${selectedMunicipality}/`)
+                        .then(response => response.json())
+                        .then(wards => {
+                            wardSelect.disabled = false;
+                            populateDropdown(wardSelect, wards, 'ward_number', 'ward_id');
+                        })
+                        .catch(error => console.error('Error fetching wards:', error));
+                } else {
+                    wardSelect.disabled = true;
+                }
+            });
+
+            getGeoJSONButton.addEventListener('click', function () {
+                const selectedWard = wardSelect.value;
+
+                if (selectedWard) {
+                    fetch(`http://localhost:8000/geojson/${selectedWard}/`)
+                        .then(response => response.json())
+                        .then(geojson => {
+                            geojsonOutput.textContent = JSON.stringify(geojson, null, 2);
+                        })
+                        .catch(error => console.error('Error fetching GeoJSON:', error));
+                } else {
+                    geojsonOutput.textContent = 'Please select a ward to get GeoJSON.';
+                }
+            });
+
+            function populateDropdown(dropdown, items, labelKey, valueKey) {
+                dropdown.innerHTML = '<option value="">Select an option</option>';
+                items.forEach(item => {
+                    const option = document.createElement('option');
+                    option.value = item[valueKey];
+                    option.textContent = item[labelKey];
+                    dropdown.appendChild(option);
+                });
+            }
+        });
+    </script>
+</body>
+</html>
