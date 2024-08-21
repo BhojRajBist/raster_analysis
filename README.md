@@ -52,3 +52,17 @@ pip install h3 h3ronpy rasterio asyncio asyncpg aiohttp
 
 
 http://34.73.124.156/docs#/default/get_mvt_tile_flood2yr__zoom___x___y___format__get
+
+https://github.com/zachasme/h3-pg/blob/main/docs/api.md
+
+ALTER TABLE public.two_year_flood
+    ALTER COLUMN geom TYPE geometry(Polygon, 4326) USING ST_SetSRID(geom, 4326);
+
+
+UPDATE public.two_year_flood
+SET geom = ST_SetSRID(
+    ST_GeomFromEWKB(
+        h3_cells_to_multi_polygon_wkb(ARRAY[h3_ix::h3index])
+    ),
+    4326
+);

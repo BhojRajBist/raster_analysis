@@ -279,7 +279,7 @@ async def visualize_h3_data(table_name: str):
 # )
 
 TABLE = {
-    'table': os.getenv('TILE_TABLE_NAME', 'flood_extent'),
+    'table': os.getenv('TILE_TABLE_NAME', 'two_year_flood'),
     'srid': os.getenv('TILE_TABLE_SRID', '4326'),
     'h3inxColumn': os.getenv('TILE_TABLE_H3INX_COLUMN', 'h3_ix'),
     'h3inxRes': os.getenv('TILE_TABLE_H3INX_RESOLUTION', 8),
@@ -385,58 +385,7 @@ async def get_mvt_tile(zoom: int, x: int, y: int, format: str):
 
 #get the ward from the datbase
 engine = create_engine(DATABASE_URL)
-# @app.get("/ward-data/")
-# async def get_ward_data(
-#     state_code: int = Query(None, description="Select State Code"),
-#     district: str = Query(None, description="Select District"),
-#     municipality: str = Query(None, description="Select Municipality"),
-#     ward_number: int = Query(None, description="Select Ward Number"),
-# ):
-#     with engine.connect() as connection:
-#         if not state_code and not district and not municipality and not ward_number:
-#             state_codes = connection.execute(text("SELECT DISTINCT \"STATE_CODE\" FROM wards ORDER BY \"STATE_CODE\"")).fetchall()
-#             districts = connection.execute(text("SELECT DISTINCT \"DISTRICT\" FROM wards ORDER BY \"DISTRICT\"")).fetchall()
-#             municipalities = connection.execute(text("SELECT DISTINCT \"GaPa_NaPa\" FROM wards ORDER BY \"GaPa_NaPa\"")).fetchall()
-#             wards = connection.execute(text("SELECT DISTINCT \"NEW_WARD_N\" FROM wards ORDER BY \"NEW_WARD_N\"")).fetchall()
 
-#             state_codes = [row[0] for row in state_codes]
-#             districts = [row[0] for row in districts]
-#             municipalities = [row[0] for row in municipalities]
-#             wards = [row[0] for row in wards]
-
-#             return {
-#                 "state_codes": state_codes,
-#                 "districts": districts,
-#                 "municipalities": municipalities,
-#                 "wards": wards,
-#             }
-#         elif state_code and district and municipality and ward_number:
-#             query = text("""
-#                 SELECT ST_AsGeoJSON(geom) as geojson
-#                 FROM wards
-#                 WHERE "STATE_CODE" = :state_code
-#                 AND "DISTRICT" = :district
-#                 AND "GaPa_NaPa" = :municipality
-#                 AND "NEW_WARD_N" = :ward_number
-#                 LIMIT 1;
-#             """)
-
-#             result = connection.execute(query, {
-#                 "state_code": state_code,
-#                 "district": district,
-#                 "municipality": municipality,
-#                 "ward_number": ward_number
-#             }).mappings().fetchone()  # Use mappings() for dictionary-like access
-
-#             if not result:
-#                 raise HTTPException(status_code=404, detail="Ward not found")
-
-#             geojson = result['geojson']  # Access by column name
-#             return json.loads(geojson)
-#         else:
-#             raise HTTPException(status_code=400, detail="Please provide all required parameters: state_code, district, municipality, and ward_number")
-
-# Helper function to get distinct values for dropdowns
 def get_distinct_values(column_name: str, filter_conditions: dict = None):
     query = f'SELECT DISTINCT "{column_name}" FROM wards'
     conditions = []
