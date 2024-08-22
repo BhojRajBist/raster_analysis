@@ -66,3 +66,29 @@ SET geom = ST_SetSRID(
     ),
     4326
 );
+
+
+export DATABASE_URL=postgresql://postgres:postgres@localhost/practice
+
+./pg_tileserv
+
+
+
+To change the geometry
+
+
+``
+ALTER TABLE public.wards ADD COLUMN geom_3857 geometry(MultiPolygon, 3857);
+
+UPDATE public.wards SET geom_3857 = ST_Transform(geom, 3857);
+
+
+SELECT DISTINCT ST_SRID(geom_3857) FROM public.wards;
+
+
+ALTER TABLE public.wards DROP COLUMN geom;
+
+
+ALTER TABLE public.wards RENAME COLUMN geom_3857 TO geom;
+``
+

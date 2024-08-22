@@ -411,7 +411,7 @@ async def get_ward_data(
     municipality: str = Query(None, description="Select Municipality"),
     ward_number: int = Query(None, description="Select Ward Number"),
 ):
-    # If no parameters are provided, return the options for all dropdowns
+
     if state_code is None and district is None and municipality is None and ward_number is None:
         state_codes = get_distinct_values("STATE_CODE")
         districts = get_distinct_values("DISTRICT")
@@ -424,8 +424,6 @@ async def get_ward_data(
             "municipalities": municipalities,
             "wards": wards,
         }
-
-    # If all parameters are provided, return the GeoJSON
     elif state_code and district and municipality and ward_number:
         query = text("""
             SELECT ST_AsGeoJSON(geom) as geojson
@@ -451,7 +449,6 @@ async def get_ward_data(
         geojson = result['geojson']
         return json.loads(geojson)
 
-    # If some parameters are provided, return the options for the next dropdowns
     else:
         filter_conditions = {
             "STATE_CODE": state_code,
