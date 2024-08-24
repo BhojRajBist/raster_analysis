@@ -90,5 +90,11 @@ ALTER TABLE public.wards DROP COLUMN geom;
 
 
 ALTER TABLE public.wards RENAME COLUMN geom_3857 TO geom;
+
+
+python cog2h3.py --cog /home/bhoj/Desktop/Practice/raster_analysis/AllBands_Kaski_2024.tif  --table multiband  --multiband  --sample_by mode
 ``
 
+/home/bhoj/Desktop/Practice/raster_analysis/multi_band_output.tif
+
+python cog2h3.py --cog /home/bhoj/Desktop/Practice/raster_analysis/20240824/multiband_output.tif  --table temporal  --multiband  --sample_by mode

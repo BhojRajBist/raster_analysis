@@ -294,27 +294,14 @@ async def get_db_pool():
 
 @cached(cache)
 async def get_tile(zoom: int, x: int, y: int, pool):
-    # async with pool.acquire() as conn:
-    #     env = tile_to_envelope(zoom, x, y)
-    #     sql = envelope_to_sql(env)
-    #     logging.debug(f"SQL Query: {sql}")  # Print the SQL query
-    #     pbf = await conn.fetchval(sql)
-    #     logging.debug(f"PBF data received. Size: {len(pbf)} bytes")
-    #     return await conn.fetchval(sql)
     async with pool.acquire() as conn:
         env = tile_to_envelope(zoom, x, y)
         sql = envelope_to_sql(env)
         logging.debug(f"SQL Query: {sql}")  # Print the SQL query
-        
-        try:
-            pbf = await conn.fetchval(sql)
-            if not pbf:
-                raise Exception("No PBF data returned from the query")
-            logging.debug(f"PBF data received. Size: {len(pbf)} bytes")
-            return pbf
-        except Exception as e:
-            logging.error(f"Error fetching tile: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+        pbf = await conn.fetchval(sql)
+        logging.debug(f"PBF data received. Size: {len(pbf)} bytes")
+        return await conn.fetchval(sql)
+
         
 def tile_to_envelope(zoom: int, x: int, y: int):
     world_merc_max = 20037508.3427892
